@@ -190,9 +190,7 @@ export class BluedService implements OnModuleInit {
     const isLive = await this.checkAnchorLiveStatus(anchor);
     if (anchor.deleted) return;
     if (isLive) {
-      console.time(`handleLiveAnchor-${anchor.name}`);
       await this.handleLiveAnchor(anchor);
-      console.timeEnd(`handleLiveAnchor-${anchor.name}`);
     } else {
       this.stopSyncTask(anchor);
     }
