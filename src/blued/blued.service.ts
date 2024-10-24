@@ -9,7 +9,7 @@ import { Cron, CronExpression, SchedulerRegistry } from '@nestjs/schedule';
 import { firstValueFrom, map } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
 import { Anchor } from './entities/anchor.entity';
-import { BluedApi, Chat as BluedChat } from 'blued-sdk';
+import { BluedApi } from 'blued-sdk';
 import { SystemSetting } from 'src/system.entity';
 import { ConfigService } from '@nestjs/config';
 import { Live } from './entities/live.entity';
@@ -17,9 +17,9 @@ import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as duration from 'dayjs/plugin/duration';
-import { User } from './entities/user.entity';
 import { Chat } from './entities/chat.entity';
-import { Consume } from './entities/consume.entity';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -37,13 +37,13 @@ export interface ICheckLiveResponse {
 export class BluedService implements OnModuleInit {
   private readonly logger = new Logger(BluedService.name);
   private bluedClient: BluedApi;
-  private loggerMap = new Map<number, Logger>();
 
   constructor(
     private readonly scheduleRegistry: SchedulerRegistry,
     private readonly em: EntityManager,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    @InjectQueue('blued') private readonly bluedQueue: Queue,
   ) {}
 
   async onModuleInit() {
@@ -190,7 +190,9 @@ export class BluedService implements OnModuleInit {
     const isLive = await this.checkAnchorLiveStatus(anchor);
     if (anchor.deleted) return;
     if (isLive) {
-      this.handleLiveAnchor(anchor);
+      console.time(`handleLiveAnchor-${anchor.name}`);
+      await this.handleLiveAnchor(anchor);
+      console.timeEnd(`handleLiveAnchor-${anchor.name}`);
     } else {
       this.stopSyncTask(anchor);
     }
@@ -211,11 +213,11 @@ export class BluedService implements OnModuleInit {
             const enterInfo = await this.bluedClient.enterLive(
               info.userInfo.live,
             );
+            await this.bluedClient.leaveLive(info.userInfo.live);
             await this.em.upsert(Anchor, {
               uid: anchor.uid,
               total_beans: enterInfo.beans_count,
             });
-            await this.bluedClient.leaveLive(info.userInfo.live);
           } catch (error) {
             this.logger.error(`进入 ${anchor.name} 的直播间失败`);
           }
@@ -250,90 +252,6 @@ export class BluedService implements OnModuleInit {
   }
 
   /**
-   *  创建用户或更新用户信息
-   * @param uid  用户ID
-   * @param name  用户名
-   * @returns  用户信息
-   */
-  private async createUserOrUpdateInNeed(uid: number, name: string) {
-    try {
-      const user = await this.em.findOne(User, { uid });
-      if (user) {
-        if (user.name !== name) {
-          user.history_name.push(user.name);
-          user.name = name;
-          await this.em.persistAndFlush(user);
-          return user;
-        }
-        return user;
-      } else {
-        const newUser = new User();
-        newUser.uid = uid;
-        newUser.name = name;
-        await this.em.persistAndFlush(newUser);
-        return newUser;
-      }
-    } catch (error) {
-      this.logger.error(
-        `创建用户失败: ${uid},${name}`,
-        error.message,
-        error.stack,
-      );
-    }
-  }
-
-  /**
-   *  创建聊天信息
-   * @param chat  聊天信息
-   * @param lid  直播间ID
-   * @param user  用户信息
-   */
-  private async createChatIfNotExist(
-    chat: BluedChat,
-    live: Loaded<Live>,
-    user: Loaded<User>,
-  ) {
-    try {
-      const chatInDb = await this.em.findOne(Chat, {
-        live,
-        user,
-        message: chat.msg_content,
-      });
-      if (!chatInDb) {
-        const newChat = new Chat();
-        newChat.live = live;
-        newChat.user = user;
-        newChat.message = chat.msg_content;
-        newChat.createdAt = new Date(chat.msg_time * 1000);
-        await this.em.persistAndFlush(newChat);
-        function fillNameToLength(str: string, length: number) {
-          let s = str;
-          const times = str.replace(/[^\x00-\xff]/g, 'aa').length;
-          for (let i = 0; i < length - times; i++) {
-            s = ' ' + s;
-          }
-          return s;
-        }
-        const anchorName = fillNameToLength(live.anchor.name, 16);
-        const logString = `【${chat.from_rich_level.toString().padStart(2, '0')}】${fillNameToLength(user.name, 16)}:${chat.msg_content}`;
-        if (this.loggerMap.has(live.anchor.uid)) {
-          this.loggerMap.get(live.anchor.uid).log(logString);
-        } else {
-          const logger = new Logger(anchorName);
-          this.loggerMap.set(live.anchor.uid, logger);
-          logger.log(logString);
-        }
-      }
-    } catch (error) {
-      this.logger.error(
-        `创建聊天失败: ${JSON.stringify(chat, null, 2)},${JSON.stringify(user, null, 2)}`,
-        error.message,
-        error.stack,
-      );
-    }
-  }
-
-  /**
    *  同步直播间聊天
    * @param lid  直播间ID
    */
@@ -341,7 +259,11 @@ export class BluedService implements OnModuleInit {
     try {
       const chats = await this.bluedClient.syncChat(lid);
       const contents = chats.map((chat) => chat.msg_content);
-      const live = await this.em.findOne(Live, { lid });
+      const live = await this.em.findOne(
+        Live,
+        { lid },
+        { populate: ['anchor'] },
+      );
       const chatsInDb = await this.em.find(Chat, {
         live,
         message: { $in: contents },
@@ -364,11 +286,10 @@ export class BluedService implements OnModuleInit {
       ];
       for (const chat of chatsNotInDb) {
         if (blockedWords.includes(chat.msg_content)) continue;
-        const user = await this.createUserOrUpdateInNeed(
-          chat.from_id,
-          chat.from_nick_name,
-        );
-        await this.createChatIfNotExist(chat, live, user);
+        this.bluedQueue.add('handleChat', {
+          chat,
+          live,
+        });
       }
     } catch (error) {
       this.logger.error(`同步聊天失败: ${lid}`, error.message, error.stack);
@@ -393,25 +314,10 @@ export class BluedService implements OnModuleInit {
         page++;
       }
       for (const consume of consumes) {
-        const user = await this.createUserOrUpdateInNeed(
-          Number(consume.uid),
-          consume.name,
-        );
-        const live = await this.em.findOne(Live, { lid });
-        const consumeInDb = await this.em.findOne(Consume, {
-          live,
-          user,
+        this.bluedQueue.add('handleConsume', {
+          consume,
+          lid,
         });
-        if (!consumeInDb) {
-          const newConsume = new Consume();
-          newConsume.amount = Number(consume.beans);
-          newConsume.user = user;
-          newConsume.live = live;
-          await this.em.persistAndFlush(newConsume);
-        } else {
-          consumeInDb.amount = Number(consume.beans);
-          await this.em.persistAndFlush(consumeInDb);
-        }
       }
       const beans = consumes.reduce((acc, cur) => acc + Number(cur.beans), 0);
       await this.em.upsert(Live, {

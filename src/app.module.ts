@@ -7,6 +7,7 @@ import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { MongoDriver } from '@mikro-orm/mongodb';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BluedModule } from './blued/blued.module';
+import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
@@ -29,6 +30,12 @@ import { BluedModule } from './blued/blued.module';
       }),
     }),
     ScheduleModule.forRoot(),
+    BullModule.forRoot({
+      connection: {
+        host: 'localhost',
+        port: 6379,
+      },
+    }),
     BluedModule,
   ],
   controllers: [AppController],
