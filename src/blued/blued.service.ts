@@ -1,4 +1,4 @@
-import { EntityManager, Loaded } from '@mikro-orm/mongodb';
+import { EntityManager, Loaded } from '@mikro-orm/mysql';
 import {
   BadRequestException,
   Injectable,

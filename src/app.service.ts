@@ -1,4 +1,4 @@
-import { EntityManager } from '@mikro-orm/mongodb';
+import { EntityManager } from '@mikro-orm/mysql';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SystemSetting } from './system.entity';

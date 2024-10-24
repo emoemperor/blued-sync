@@ -4,10 +4,10 @@ import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import config from './config';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
-import { MongoDriver } from '@mikro-orm/mongodb';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BluedModule } from './blued/blued.module';
 import { BullModule } from '@nestjs/bullmq';
+import { MySqlDriver } from '@mikro-orm/mysql';
 
 @Module({
   imports: [
@@ -18,7 +18,7 @@ import { BullModule } from '@nestjs/bullmq';
     MikroOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        driver: MongoDriver,
+        driver: MySqlDriver,
         clientUrl: configService.get<string>('database.host'),
         dbName: configService.get<string>('database.dbName'),
         entities: ['dist/**/*.entity.js'],
