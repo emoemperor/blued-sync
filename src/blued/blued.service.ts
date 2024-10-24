@@ -174,11 +174,7 @@ export class BluedService implements OnModuleInit {
   private async dailyChangeUsername() {
     if (!this.bluedClient) {
       const randomName = Math.random().toString(36).substring(2);
-      const balanceInfo = await this.bluedClient.checkBalance();
-      await this.bluedClient.editUsername(
-        BluedApi.decryptUid(balanceInfo.enc_uid),
-        randomName,
-      );
+      await this.bluedClient.editUsername(randomName);
     }
   }
 

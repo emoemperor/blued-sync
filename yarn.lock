@@ -1673,10 +1673,10 @@ bl@^4.1.0:
     inherits "^2.0.4"
     readable-stream "^3.4.0"
 
-blued-sdk@^1.1.18:
-  version "1.1.18"
-  resolved "https://registry.yarnpkg.com/blued-sdk/-/blued-sdk-1.1.18.tgz#e7c1dac634a0dd8b2f654992b26aa22d8460a7d7"
-  integrity sha512-kGgxJwSOnP0qdTCLJW7b7320BKt++09psqAsFZbdtup6ZwOUxjFyCBWTOegXs9PBYDupFaemEdPQlBHdQvf+Ww==
+blued-sdk@^1.1.19:
+  version "1.1.19"
+  resolved "https://registry.yarnpkg.com/blued-sdk/-/blued-sdk-1.1.19.tgz#324ea8e0b72e2185783bf82310364a4e32c5ccb6"
+  integrity sha512-qmme9lehzbpk+YvI4+LTW+agvZgFOPsxdFrszYe1aIMm81QVa1nS4YKQ3/qgTWVAuJOo9JrTc5aP3NXUItX4QA==
   dependencies:
     axios "^1.7.7"
     crypto-js "^4.2.0"
