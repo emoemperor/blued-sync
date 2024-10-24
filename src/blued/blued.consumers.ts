@@ -130,6 +130,7 @@ export class BluedConsumer extends WorkerHost {
         newChat.message = chat.msg_content;
         newChat.createdAt = new Date(chat.msg_time * 1000);
         await this.em.persistAndFlush(newChat);
+
         function fillNameToLength(str: string, length: number) {
           let s = str;
           const times = str.replace(/[^\x00-\xff]/g, 'aa').length;
@@ -138,14 +139,16 @@ export class BluedConsumer extends WorkerHost {
           }
           return s;
         }
-        const anchorName = fillNameToLength(live.anchor.name, 16);
-        const logString = `【${chat.from_rich_level.toString().padStart(2, '0')}】${fillNameToLength(user.name, 16)}:${chat.msg_content}`;
-        if (this.loggerMap.has(live.anchor.uid)) {
-          this.loggerMap.get(live.anchor.uid).log(logString);
-        } else {
-          const logger = new Logger(anchorName);
-          this.loggerMap.set(live.anchor.uid, logger);
-          logger.log(logString);
+        if (live.anchor?.name) {
+          const anchorName = fillNameToLength(live.anchor.name, 16);
+          const logString = `【${chat.from_rich_level.toString().padStart(2, '0')}】${fillNameToLength(user.name, 16)}:${chat.msg_content}`;
+          if (this.loggerMap.has(live.anchor.uid)) {
+            this.loggerMap.get(live.anchor.uid).log(logString);
+          } else {
+            const logger = new Logger(anchorName);
+            this.loggerMap.set(live.anchor.uid, logger);
+            logger.log(logString);
+          }
         }
       }
     } catch (error) {
