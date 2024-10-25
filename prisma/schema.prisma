@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Setting {
+  id          Int     @id @default(autoincrement())
+  key         String
+  value       String  @db.VarChar(600)
+  description String?
+}
+
+model Anchor {
+  uid         Int     @id
+  name        String
+  avatar      String?
+  is_live     Boolean @default(false)
+  total_beans Int     @default(0)
+  deleted     Boolean @default(false)
+  Live        Live[]
+}
+
+model Live {
+  lid       Int       @id
+  uid       Int
+  link      String
+  beans     Int       @default(0)
+  createdAt DateTime  @default(now())
+  anchor    Anchor    @relation(fields: [uid], references: [uid])
+  Consume   Consume[]
+  Chat      Chat[]
+}
+
+model User {
+  uid         Int           @id
+  name        String
+  HistoryName HistoryName[]
+  Consume     Consume[]
+  Chat        Chat[]
+}
+
+model HistoryName {
+  id   Int    @id @default(autoincrement())
+  uid  Int
+  name String
+  user User   @relation(fields: [uid], references: [uid])
+}
+
+model Chat {
+  cid       String   @id
+  message   String
+  uid       Int
+  lid       Int
+  createdAt DateTime @default(now())
+  User      User     @relation(fields: [uid], references: [uid])
+  Live      Live     @relation(fields: [lid], references: [lid])
+}
+
+model Consume {
+  cid    String @id
+  amount Int
+  uid    Int
+  lid    Int
+  User   User   @relation(fields: [uid], references: [uid])
+  Live   Live   @relation(fields: [lid], references: [lid])
+}

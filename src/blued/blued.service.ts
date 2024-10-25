@@ -8,18 +8,17 @@ import {
 import { Cron, CronExpression, SchedulerRegistry } from '@nestjs/schedule';
 import { firstValueFrom, map } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
-import { Anchor } from './entities/anchor.entity';
+import { Anchor } from '@prisma/client';
 import { BluedApi } from 'blued-sdk';
 import { SystemSetting } from 'src/system.entity';
 import { ConfigService } from '@nestjs/config';
-import { Live } from './entities/live.entity';
 import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
 import * as timezone from 'dayjs/plugin/timezone';
 import * as duration from 'dayjs/plugin/duration';
-import { Chat } from './entities/chat.entity';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { PrismaService } from 'src/prisma.service';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -41,6 +40,7 @@ export class BluedService implements OnModuleInit {
   constructor(
     private readonly scheduleRegistry: SchedulerRegistry,
     private readonly em: EntityManager,
+    private readonly prisma: PrismaService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     @InjectQueue('blued') private readonly bluedQueue: Queue,
@@ -51,81 +51,65 @@ export class BluedService implements OnModuleInit {
   }
 
   async getChatsByAnchorUid(uid: number) {
-    return await this.em.findOne(
-      Anchor,
-      { uid },
-      { populate: ['lives', 'lives.chats', 'lives.chats.user'] },
-    );
+    return await this.prisma.anchor.findUnique({
+      where: { uid },
+      include: { Live: { include: { Chat: { include: { User: true } } } } },
+    });
   }
 
   async getConsumeInfo(lid: number) {
-    const live = await this.em.findOne(
-      Live,
-      {
-        lid,
-      },
-      { populate: ['consumes', 'consumes.user'] },
-    );
-    if (!live) {
-      throw new BadRequestException('找不到该直播间');
-    }
-    const response = {
-      lid: live.lid,
-      link: live.link,
-      beans: live.beans,
-      consumes: live.consumes
-        .getItems()
-        .map((consume) => ({
-          user: consume.user.name,
-          amount: consume.amount,
-        }))
-        .sort((a, b) => b.amount - a.amount),
-    };
-    return response;
+    const consume = await this.prisma.consume.findMany({
+      where: { Live: { lid } },
+      include: { User: true },
+    });
+    const consumeInfo = consume.map((item) => ({
+      user: item.User.name,
+      amount: item.amount,
+    }));
+    return consumeInfo;
   }
 
   async getAllAnchors() {
-    return this.em.find(Anchor, {});
+    return await this.prisma.anchor.findMany();
   }
 
   async getAnchorInfo(uid: number) {
-    return await this.em.find(
-      Anchor,
-      { uid },
-      {
-        populate: ['lives', 'lives.consumes', 'lives.consumes.user'],
-      },
-    );
+    return await this.prisma.anchor.findUnique({
+      where: { uid },
+      include: { Live: true },
+    });
   }
 
   async unSubscribeAnchor(uid: number) {
-    const anchor = await this.em.findOne(Anchor, { uid });
-    if (anchor) {
-      this.stopSyncTask(anchor);
-      anchor.deleted = true;
-      await this.em.persistAndFlush(anchor);
-    } else {
-      throw new BadRequestException('找不到该主播');
-    }
+    await this.prisma.anchor.update({
+      where: { uid },
+      data: { deleted: true },
+    });
   }
 
   async searchAnchorByUid(uid: number) {
     try {
-      const anchorInDb = await this.em.findOne(Anchor, { uid });
+      const anchorInDb = await this.prisma.anchor.findUnique({
+        where: { uid },
+      });
       if (anchorInDb) {
         if (anchorInDb.deleted) {
-          anchorInDb.deleted = false;
-          await this.em.persistAndFlush(anchorInDb);
+          await this.prisma.anchor.update({
+            where: { uid },
+            data: { deleted: false },
+          });
         }
         return anchorInDb;
       }
       const info = await BluedApi.getInfoByUid(uid);
       if (info) {
-        const anchor = new Anchor();
-        anchor.uid = uid;
-        anchor.name = info.userInfo.name;
-        anchor.avatar = info.userInfo.avatar;
-        await this.em.persistAndFlush(anchor);
+        const anchor = await this.prisma.anchor.create({
+          data: {
+            uid,
+            name: info.userInfo.name,
+            avatar: info.userInfo.avatar,
+          },
+        });
         return anchor;
       } else {
         throw new BadRequestException('找不到该主播');
@@ -138,11 +122,15 @@ export class BluedService implements OnModuleInit {
 
   async searchAnchorByName(name: string) {
     try {
-      const anchorInDb = await this.em.findOne(Anchor, { name });
+      const anchorInDb = await this.prisma.anchor.findFirst({
+        where: { name },
+      });
       if (anchorInDb) {
         if (anchorInDb.deleted) {
-          anchorInDb.deleted = false;
-          await this.em.persistAndFlush(anchorInDb);
+          await this.prisma.anchor.update({
+            where: { uid: anchorInDb.uid },
+            data: { deleted: false },
+          });
         }
         return anchorInDb;
       }
@@ -157,12 +145,14 @@ export class BluedService implements OnModuleInit {
       if (!user) {
         throw new BadRequestException('找不到该主播');
       }
-      const anchor = new Anchor();
-      anchor.uid = user.uid;
-      anchor.name = user.name;
-      anchor.avatar = user.avatar;
-      anchor.is_live = user.live === 1;
-      await this.em.persistAndFlush(anchor);
+      const anchor = await this.prisma.anchor.create({
+        data: {
+          uid: user.uid,
+          name: user.name,
+          avatar: user.avatar,
+          is_live: user.live === 1,
+        },
+      });
       return anchor;
     } catch (error) {
       this.logger.error(`搜索主播失败: ${name}`, error.message, error.stack);
@@ -180,13 +170,13 @@ export class BluedService implements OnModuleInit {
 
   @Cron(CronExpression.EVERY_MINUTE)
   private async checkTask() {
-    const anchors = await this.em.find(Anchor, {});
+    const anchors = await this.prisma.anchor.findMany();
     for (const anchor of anchors) {
       this.handleCheckTask(anchor);
     }
   }
 
-  private async handleCheckTask(anchor: Loaded<Anchor>) {
+  private async handleCheckTask(anchor: Anchor) {
     const isLive = await this.checkAnchorLiveStatus(anchor);
     if (anchor.deleted) return;
     if (isLive) {
@@ -196,15 +186,15 @@ export class BluedService implements OnModuleInit {
     }
   }
 
-  private async handleLiveAnchor(anchor: Loaded<Anchor>) {
+  private async handleLiveAnchor(anchor: Anchor) {
     try {
       if (!this.bluedClient) {
         await this.initBluedClient();
       }
       const info = await BluedApi.getInfoByUid(anchor.uid);
       if (info && info.liveInfo) {
-        const liveInDB = await this.em.findOne(Live, {
-          lid: info.userInfo.live,
+        const liveInDB = await this.prisma.live.findUnique({
+          where: { lid: info.userInfo.live },
         });
         if (!liveInDB) {
           try {
@@ -212,34 +202,37 @@ export class BluedService implements OnModuleInit {
               info.userInfo.live,
             );
             await this.bluedClient.leaveLive(info.userInfo.live);
-            await this.em.upsert(Anchor, {
-              uid: anchor.uid,
-              total_beans: enterInfo.beans_count,
+            await this.prisma.anchor.update({
+              where: { uid: anchor.uid },
+              data: { total_beans: enterInfo.beans_count },
             });
           } catch (error) {
             this.logger.error(`进入 ${anchor.name} 的直播间失败`);
           }
-          const live = new Live();
-          live.lid = info.userInfo.live;
-          live.link = `https:${info.liveInfo.liveUrl}`;
-          live.anchor = anchor;
-          live.beans = 0;
+
           const [hours, minutes, seconds] = info.liveInfo.initTime
             .split(':')
             .map(Number);
-          live.createdAt = dayjs()
-            .subtract(
-              dayjs
-                .duration({
-                  hours,
-                  minutes,
-                  seconds,
-                })
-                .asSeconds(),
-              'seconds',
-            )
-            .toDate();
-          await this.em.persistAndFlush(live);
+          await this.prisma.live.create({
+            data: {
+              lid: info.userInfo.live,
+              link: `https:${info.liveInfo.liveUrl}`,
+              anchor: { connect: { uid: anchor.uid } },
+              beans: 0,
+              createdAt: dayjs()
+                .subtract(
+                  dayjs
+                    .duration({
+                      hours,
+                      minutes,
+                      seconds,
+                    })
+                    .asSeconds(),
+                  'seconds',
+                )
+                .toDate(),
+            },
+          });
           this.logger.log(`🎉 ${anchor.name} 开播了`);
         }
         this.startSyncTask(anchor, info.userInfo.live);
@@ -257,14 +250,15 @@ export class BluedService implements OnModuleInit {
     try {
       const chats = await this.bluedClient.syncChat(lid);
       const contents = chats.map((chat) => chat.msg_content);
-      const live = await this.em.findOne(
-        Live,
-        { lid },
-        { populate: ['anchor'] },
-      );
-      const chatsInDb = await this.em.find(Chat, {
-        live,
-        message: { $in: contents },
+      const live = await this.prisma.live.findUnique({
+        where: { lid },
+        include: { anchor: true },
+      });
+      const chatsInDb = await this.prisma.chat.findMany({
+        where: {
+          Live: { lid },
+          message: { in: contents },
+        },
       });
       const chatsNotInDb = chats.filter((chat) => {
         const chatInDb = chatsInDb.find(
@@ -318,9 +312,9 @@ export class BluedService implements OnModuleInit {
         });
       }
       const beans = consumes.reduce((acc, cur) => acc + Number(cur.beans), 0);
-      await this.em.upsert(Live, {
-        lid,
-        beans,
+      await this.prisma.live.update({
+        where: { lid },
+        data: { beans },
       });
     } catch (error) {
       this.logger.error(`同步消费失败: ${uid}`, error.message, error.stack);
@@ -385,8 +379,10 @@ export class BluedService implements OnModuleInit {
   private async initBluedClient() {
     console.log('initBluedClient');
     if (!this.bluedClient) {
-      const setting = await this.em.findOne(SystemSetting, {
-        key: this.configService.get<string>('system_setting_key.blued_auth'),
+      const setting = await this.prisma.setting.findFirst({
+        where: {
+          key: this.configService.get<string>('system_setting_key.blued_auth'),
+        },
       });
       if (!setting) {
         return;
@@ -414,14 +410,14 @@ export class BluedService implements OnModuleInit {
       const { data } = await firstValueFrom(
         this.httpService
           .get<ICheckLiveResponse>(
-            `https://app.blued.cn/live/islive/${anchor.encrypted_uid}`,
+            `https://app.blued.cn/live/islive/${BluedApi.encryptUid(anchor.uid)}`,
           )
           .pipe(map(({ data }) => data)),
       );
       if (anchor.is_live !== data.islive) {
-        await this.em.upsert(Anchor, {
-          uid: anchor.uid,
-          is_live: data.islive,
+        await this.prisma.anchor.update({
+          where: { uid: anchor.uid },
+          data: { is_live: data.islive },
         });
       }
       return data.islive;

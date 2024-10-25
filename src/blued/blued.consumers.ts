@@ -1,25 +1,23 @@
-import { EntityManager, Loaded } from '@mikro-orm/mysql';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { Chat as BluedChat, Consume as BluedConsume } from 'blued-sdk';
-import { User } from './entities/user.entity';
-import { Chat } from './entities/chat.entity';
-import { Live } from './entities/live.entity';
-import { Consume } from './entities/consume.entity';
+import { PrismaService } from 'src/prisma.service';
+import { Live, User } from '@prisma/client';
+import * as dayjs from 'dayjs';
 
 @Processor('blued')
 export class BluedConsumer extends WorkerHost {
   private readonly logger = new Logger(BluedConsumer.name);
   private loggerMap = new Map<number, Logger>();
-  constructor(private readonly em: EntityManager) {
+  constructor(private readonly prisma: PrismaService) {
     super();
   }
   async process(
     job: Job<
       | {
           chat: BluedChat;
-          live: Loaded<Live>;
+          live: Live;
         }
       | {
           consume: BluedConsume;
@@ -27,7 +25,7 @@ export class BluedConsumer extends WorkerHost {
         }
     >,
   ): Promise<void> {
-    let user: Loaded<User>, live: Loaded<Live>;
+    let user: User, live: Live;
     if ('chat' in job.data) {
       user = await this.createUserOrUpdateInNeed(
         job.data.chat.from_id,
@@ -39,26 +37,33 @@ export class BluedConsumer extends WorkerHost {
         Number(job.data.consume.uid),
         job.data.consume.name,
       );
-      live = await this.em.findOne(Live, { lid: job.data.lid });
+      live = await this.prisma.live.findUnique({
+        where: { lid: job.data.lid },
+      });
     }
 
     switch (job.name) {
       case 'handleConsume':
         if ('consume' in job.data) {
-          const consumeInDb = await this.em.findOne(Consume, {
-            live,
-            user,
+          const cid = `${live.lid}-${user.uid}`;
+          await this.prisma.consume.upsert({
+            where: { cid },
+            update: { amount: Number(job.data.consume.beans) },
+            create: {
+              cid,
+              amount: Number(job.data.consume.beans),
+              User: {
+                connect: {
+                  uid: user.uid,
+                },
+              },
+              Live: {
+                connect: {
+                  lid: live.lid,
+                },
+              },
+            },
           });
-          if (!consumeInDb) {
-            const newConsume = new Consume();
-            newConsume.amount = Number(job.data.consume.beans);
-            newConsume.user = user;
-            newConsume.live = live;
-            await this.em.persistAndFlush(newConsume);
-          } else {
-            consumeInDb.amount = Number(job.data.consume.beans);
-            await this.em.persistAndFlush(consumeInDb);
-          }
         }
         break;
       case 'handleChat':
@@ -81,21 +86,28 @@ export class BluedConsumer extends WorkerHost {
    */
   private async createUserOrUpdateInNeed(uid: number, name: string) {
     try {
-      const user = await this.em.findOne(User, { uid });
+      const user = await this.prisma.user.findUnique({ where: { uid } });
       if (user) {
         if (user.name !== name) {
-          user.history_name.push(user.name);
-          user.name = name;
-          await this.em.persistAndFlush(user);
-          return user;
+          await this.prisma.historyName.create({
+            data: {
+              uid: user.uid,
+              name: user.name,
+            },
+          });
+          return await this.prisma.user.update({
+            where: { uid },
+            data: { name },
+          });
         }
         return user;
       } else {
-        const newUser = new User();
-        newUser.uid = uid;
-        newUser.name = name;
-        await this.em.persistAndFlush(newUser);
-        return newUser;
+        return await this.prisma.user.create({
+          data: {
+            uid,
+            name,
+          },
+        });
       }
     } catch (error) {
       this.logger.error(
@@ -112,44 +124,54 @@ export class BluedConsumer extends WorkerHost {
    * @param lid  直播间ID
    * @param user  用户信息
    */
-  private async createChatIfNotExist(
-    chat: BluedChat,
-    live: Loaded<Live>,
-    user: Loaded<User>,
-  ) {
+  private async createChatIfNotExist(chat: BluedChat, live: Live, user: User) {
     try {
-      let chatInDb = await this.em.findOne(Chat, {
-        live,
-        user,
-        message: chat.msg_content,
+      const cid = `${live.lid}-${user.uid}-${chat.msg_time}-${dayjs().format('SSS')}`;
+      const chatInDb = await this.prisma.chat.findUnique({ where: { cid } });
+      if (chatInDb) {
+        return;
+      }
+      const newChat = await this.prisma.chat.create({
+        data: {
+          cid,
+          message: chat.msg_content,
+          User: {
+            connect: {
+              uid: user.uid,
+            },
+          },
+          Live: {
+            connect: {
+              lid: live.lid,
+            },
+          },
+          createdAt: new Date(chat.msg_time * 1000),
+        },
+        include: {
+          Live: {
+            include: {
+              anchor: true,
+            },
+          },
+        },
       });
-      if (!chatInDb) {
-        const newChat = new Chat();
-        newChat.live = live;
-        newChat.user = user;
-        newChat.message = chat.msg_content;
-        newChat.createdAt = new Date(chat.msg_time * 1000);
-        await this.em.persistAndFlush(newChat);
-
-        function fillNameToLength(str: string, length: number) {
-          let s = str;
-          const times = str.replace(/[^\x00-\xff]/g, 'aa').length;
-          for (let i = 0; i < length - times; i++) {
-            s = ' ' + s;
-          }
-          return s;
+      function fillNameToLength(str: string, length: number) {
+        let s = str;
+        const times = str.replace(/[^\x00-\xff]/g, 'aa').length;
+        for (let i = 0; i < length - times; i++) {
+          s = ' ' + s;
         }
-        if (live.anchor?.name) {
-          const anchorName = fillNameToLength(live.anchor.name, 16);
-          const logString = `【${chat.from_rich_level.toString().padStart(2, '0')}】${fillNameToLength(user.name, 16)}:${chat.msg_content}`;
-          if (this.loggerMap.has(live.anchor.uid)) {
-            this.loggerMap.get(live.anchor.uid).log(logString);
-          } else {
-            const logger = new Logger(anchorName);
-            this.loggerMap.set(live.anchor.uid, logger);
-            logger.log(logString);
-          }
-        }
+        return s;
+      }
+      const logString = `【${chat.from_rich_level.toString().padStart(2, '0')}】${fillNameToLength(user.name, 16)}:${chat.msg_content}`;
+      let log: Logger;
+      if (this.loggerMap.has(newChat.Live.anchor.uid)) {
+        log = this.loggerMap.get(newChat.Live.anchor.uid);
+        log.log(logString);
+      } else {
+        log = new Logger(fillNameToLength(newChat.Live.anchor.name, 16));
+        log.log(logString);
+        this.loggerMap.set(newChat.Live.anchor.uid, log);
       }
     } catch (error) {
       this.logger.error(
