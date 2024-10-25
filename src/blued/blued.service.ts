@@ -1,4 +1,3 @@
-import { EntityManager, Loaded } from '@mikro-orm/mysql';
 import {
   BadRequestException,
   Injectable,
@@ -10,7 +9,6 @@ import { firstValueFrom, map } from 'rxjs';
 import { HttpService } from '@nestjs/axios';
 import { Anchor } from '@prisma/client';
 import { BluedApi } from 'blued-sdk';
-import { SystemSetting } from 'src/system.entity';
 import { ConfigService } from '@nestjs/config';
 import * as dayjs from 'dayjs';
 import * as utc from 'dayjs/plugin/utc';
@@ -39,7 +37,6 @@ export class BluedService implements OnModuleInit {
 
   constructor(
     private readonly scheduleRegistry: SchedulerRegistry,
-    private readonly em: EntityManager,
     private readonly prisma: PrismaService,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
@@ -327,7 +324,7 @@ export class BluedService implements OnModuleInit {
    * @param lid  直播间ID
    * @memberof BluedService
    */
-  private startSyncTask(anchor: Loaded<Anchor>, lid: number) {
+  private startSyncTask(anchor: Anchor, lid: number) {
     const syncInterval = 1000 * 30;
     const syncChatTaskName = `${anchor.uid}-同步聊天`;
     const syncConsumeTaskName = `${anchor.uid}-同步消费`;
@@ -357,7 +354,7 @@ export class BluedService implements OnModuleInit {
    * @param anchor 主播信息
    * @memberof BluedService
    */
-  private stopSyncTask(anchor: Loaded<Anchor>) {
+  private stopSyncTask(anchor: Anchor) {
     const syncChatTaskName = `${anchor.uid}-同步聊天`;
     const syncConsumeTaskName = `${anchor.uid}-同步消费`;
     try {
@@ -403,9 +400,7 @@ export class BluedService implements OnModuleInit {
    * @param anchor 主播信息
    * @returns 是否正在直播
    */
-  private async checkAnchorLiveStatus(
-    anchor: Loaded<Anchor>,
-  ): Promise<boolean> {
+  private async checkAnchorLiveStatus(anchor: Anchor): Promise<boolean> {
     try {
       const { data } = await firstValueFrom(
         this.httpService
