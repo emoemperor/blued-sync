@@ -6,6 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
+    "db":"prisma generate",
     "build:css:dev": "tailwindcss -i ./src/input.css -o ./public/output.css --watch",
     "dev": "run-p start:dev build:css:dev",
     "build": "nest build",
