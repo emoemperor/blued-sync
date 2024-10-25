@@ -6,6 +6,7 @@ import config from './config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { BluedModule } from './blued/blued.module';
 import { BullModule } from '@nestjs/bullmq';
+import { PrismaService } from './prisma.service';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { BullModule } from '@nestjs/bullmq';
     }),
     BluedModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, PrismaService],
   providers: [AppService],
 })
 export class AppModule {}
