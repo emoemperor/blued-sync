@@ -23,7 +23,7 @@ import { PrismaService } from './prisma.service';
     }),
     BluedModule,
   ],
-  controllers: [AppController, PrismaService],
-  providers: [AppService],
+  controllers: [AppController],
+  providers: [AppService, PrismaService],
 })
 export class AppModule {}
