@@ -1,45 +1,32 @@
-import { EntityManager } from '@mikro-orm/mysql';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SystemSetting } from './system.entity';
+import { PrismaService } from './prisma.service';
 
 @Injectable()
 export class AppService {
   constructor(
     private readonly configService: ConfigService,
-    private readonly em: EntityManager,
+    private readonly prisma: PrismaService,
   ) {}
 
   async setSystemSetting(key: string, value: any) {
-    const setting = await this.em.findOne(SystemSetting, { key });
-    if (setting) {
-      setting.value = value;
-      await this.em.persistAndFlush(setting);
-      return setting;
-    } else {
-      const newSetting = new SystemSetting();
-      newSetting.key = key;
-      newSetting.value = value;
-      await this.em.persistAndFlush(newSetting);
-      return newSetting;
-    }
+    return await this.prisma.setting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    });
   }
 
   async getSystemSetting(key: string) {
-    return this.em.findOne(SystemSetting, { key });
+    return await this.prisma.setting.findUnique({ where: { key } });
   }
 
   async getSystemSettings() {
-    return this.em.find(SystemSetting, {});
+    return await this.prisma.setting.findMany();
   }
 
   async deleteSystemSetting(key: string) {
-    const setting = await this.em.findOne(SystemSetting, { key });
-    if (setting) {
-      await this.em.removeAndFlush(setting);
-      return setting;
-    }
-    return null;
+    return await this.prisma.setting.delete({ where: { key } });
   }
 
   async setBluedToken(token: string) {

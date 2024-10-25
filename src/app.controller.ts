@@ -1,16 +1,9 @@
-import {
-  Body,
-  Controller,
-  ForbiddenException,
-  Logger,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Post } from '@nestjs/common';
 import { AppService } from './app.service';
 import { ConfigService } from '@nestjs/config';
 
 @Controller()
 export class AppController {
-  private readonly logger = new Logger(AppController.name);
   constructor(
     private readonly appService: AppService,
     private readonly configService: ConfigService,

@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  ParseIntPipe,
-  Query,
-  Render,
-} from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { BluedService } from './blued.service';
 
 @Controller('blued')
@@ -29,13 +22,4 @@ export class BluedController {
   getConsumeInfoByLid(@Param('lid', ParseIntPipe) lid: number) {
     return this.bluedService.getConsumeInfo(lid);
   }
-
-  //   @Get()
-  //   @Render('blued/index')
-  //   async index() {
-  //     const anchors = await this.bluedService.getAllAnchors();
-  //     return {
-  //       anchors,
-  //     };
-  //   }
 }

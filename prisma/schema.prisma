@@ -15,7 +15,7 @@ datasource db {
 
 model Setting {
   id          Int     @id @default(autoincrement())
-  key         String
+  key         String  @unique
   value       String  @db.VarChar(600)
   description String?
 }
