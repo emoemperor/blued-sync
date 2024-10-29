@@ -160,9 +160,11 @@ export class BluedService implements OnModuleInit {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   private async dailyChangeUsername() {
     if (!this.bluedClient) {
-      const randomName = Math.random().toString(36).substring(2);
-      await this.bluedClient.editUsername(randomName);
+      await this.initBluedClient();
     }
+    const randomUsername = Math.random().toString(36).substring(7);
+    this.logger.log('每日更换用户名', randomUsername);
+    await this.bluedClient.editUsername(randomUsername);
   }
 
   @Cron(CronExpression.EVERY_MINUTE)

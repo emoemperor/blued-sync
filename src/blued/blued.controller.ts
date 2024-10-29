@@ -17,9 +17,4 @@ export class BluedController {
   getAnchorInfoByUid(@Param('uid', ParseIntPipe) uid: number) {
     return this.bluedService.getAnchorInfo(uid);
   }
-
-  @Get('consume/:lid')
-  getConsumeInfoByLid(@Param('lid', ParseIntPipe) lid: number) {
-    return this.bluedService.getConsumeInfo(lid);
-  }
 }

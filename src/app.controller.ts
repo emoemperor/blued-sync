@@ -1,4 +1,10 @@
-import { Body, Controller, ForbiddenException, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Post,
+} from '@nestjs/common';
 import { AppService } from './app.service';
 import { ConfigService } from '@nestjs/config';
 
@@ -8,6 +14,11 @@ export class AppController {
     private readonly appService: AppService,
     private readonly configService: ConfigService,
   ) {}
+
+  @Get()
+  index() {
+    return 'Hello World!';
+  }
 
   @Post('blued-auth')
   setBluedToken(@Body('auth') token: string, @Body('key') key: string) {
